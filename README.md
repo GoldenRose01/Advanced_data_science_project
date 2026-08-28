@@ -37,13 +37,13 @@ Per compilare ed eseguire il codice R Markdown sono richiesti:
 * **RStudio** (consigliato)
 * Pacchetti R principali:
   ```r
-library(tidyverse)    # Manipolazione tabelle e visualizzazione grafici
-library(igraph)      
-library(tidytext)     
-library(topicmodels)  
-library(corrplot)     
-library(knitr)        
-library(scales)       
-library(broom)        
-library(tinytex)
+  library(tidyverse)
+  library(igraph)      
+  library(tidytext)     
+  library(topicmodels)  
+  library(corrplot)     
+  library(knitr)        
+  library(scales)       
+  library(broom)        
+  library(tinytex)
   ```
