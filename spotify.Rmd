@@ -1,0 +1,1825 @@
+---
+title: "L'impatto della tecnologia nel mondo della musica"
+author: "Francesco La Rosa (178327)"
+date: '`r Sys.Date()`'
+output:
+  pdf_document:
+    toc: true
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    highlight: tango
+    code_folding: show
+  word_document:
+    toc: true
+subtitle: Un analisi di Network Science and Text Mining sugli Spotify Artists & Lyrics
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  cache=TRUE,
+  fig.align = "center",
+  fig.width = 9,
+  fig.height = 6
+)
+
+set.seed(1234)
+```
+
+# 1. Introduzione e Quesiti di Ricerca
+
+## 1.1 Contesto e Motivazione del Progetto
+
+L'industria musicale sta attraversando una fase di profonda trasformazione, guidata sia dall'evoluzione tecnologica sia dall'adozione sempre più massiccia dell'IA nel campo produttivo.
+Inoltre piattaforme di streaming come Spotify non solo hanno cambiato il modo in cui ascoltiamo la musica, ma hanno anche trasformato il mercato in un ecosistema relazionale complesso, plasmato in gran parte da algoritmi di raccomandazione. 
+In parallelo, la tecnologia e l'automazione stanno diventando temi sempre più presenti e discussi all'interno delle opere stesse degli artisti.
+
+Questo progetto nasce dalla volontà di esplorare in modo empirico come le dinamiche sopra citate si riflettano sia sulle relazioni strutturali tra gli artisti, sia sui contenuti semantici che producono.
+Piuttosto che utilizzare singole tecniche in modo isolato, l'approccio scelto per questa analisi integra due metodologie fondamentali: la **Network Science** e il **Text Mining**.
+
+## 1.2 Domande di Ricerca
+
+Per guidare l'analisi e valutare l'effettivo impatto delle dinamiche discusse, sono state formulate le seguenti domande di ricerca:
+
+1.  **Struttura relazionale:** In che modo le collaborazioni (i *featuring*) definiscono le gerarchie e il posizionamento degli artisti nel mercato musicale contemporaneo?
+
+2.  **Tematiche latenti:** Come vengono percepiti e raccontati i temi legati al digitale e all'automazione all'interno dei testi musicali?
+
+3.  **Intersezione:** Esiste una relazione misurabile tra la centralità di un artista nella rete delle collaborazioni e la sua tendenza a esplorare tematiche tecnologiche nei propri brani?
+
+# 2. Dati Utilizzati: Scelte e Sfide
+
+Per rispondere a queste domande, l'analisi poggia sull'integrazione di due dataset eterogenei e complementari:
+
+## 2.1 I Metadati Musicali: Spotify Tracks Dataset
+
+Questo dataset descrive oltre 100.000 brani. Il campo `artists` permette di ricostruire le co-occorrenze tra musicisti. Sono inoltre disponibili la popolarità e alcune caratteristiche acustiche, tra cui *energy* e *danceability*, utili per descrivere le comunità individuate nella rete.
+
+## 2.2 Il Corpus Testuale: Genius Song Lyrics
+
+Per la parte testuale viene usato Genius, un archivio collaborativo di testi musicali. I testi contengono annotazioni come "[Verse 1]", punteggiatura irregolare ed espressioni gergali, quindi devono essere puliti. Sul corpus viene poi applicato il modello Latent Dirichlet Allocation (LDA), che individua gruppi di parole ricorrenti. L'eventuale legame con la tecnologia viene valutato solo in un secondo momento.
+
+# 3. Setup dell'Ambiente e Librerie R
+
+## 3.1 Scelta dei Pacchetti
+
+In R, per garantire riproducibilità e performance, si adottano le librerie standard dell'ecosistema Tidyverse e gli strumenti dedicati per grafi e NLP:
+
+- **tidyverse:** Collezione di pacchetti (dplyr, ggplot2, purrr, stringr, readr) che standardizza la manipolazione dei dati tramite sintassi a pipe (%\>%).
+
+- **igraph:** fornisce i motori computazionali ad alta velocità per il calcolo delle centralità pesate e per la manipolazione della rete di collaborazioni.
+
+- **ggplot2:** incluso in tidyverse, permette di visualizzare la rete e le metriche prodotte dal grafo.
+
+- **tidytext & topicmodels:** Gestiscono la scomposizione del testo in token e l'addestramento dell'algoritmo di Topic Modeling probabilistico (LDA).
+
+- **corrplot & knitr:** Utilizzati per generare matrici di correlazione visiva tra le metriche di rete e formattare le tabelle riassuntive nel report HTML.
+
+```{r librerie}
+# Caricamento delle librerie nell'ambiente di lavoro
+library(tidyverse)    # Manipolazione tabelle e visualizzazione grafici
+library(igraph)       # Algoritmi di Network Science (centralità, percorsi)
+library(tidytext)     # Tokenizzazione e analisi del testo
+library(topicmodels)  # Latent Dirichlet Allocation (LDA)
+library(corrplot)     # Visualizzazione matrici di correlazione
+library(knitr)        # Generazione tabelle eleganti per HTML
+library(scales)       # Formattazione assi numerici e percentuali
+library(broom)        # Risultati dei modelli in formato tabellare
+```
+
+## 3.2 Caricamento del dataset Spotify
+
+Il dataset Spotify viene caricato integralmente. Prima dell'integrazione con Genius vengono controllate le variabili necessarie per la costruzione della rete e per le successive analisi sulla popolarità e sulle caratteristiche acustiche.
+
+```{r caricamento_spotify}
+  spotify_raw <- read_csv(
+    "spotify-tracks-dataset-detailed.csv",
+    show_col_types = FALSE
+  )
+  
+  # Glimpse mostra una sintesi del dataset
+  glimpse(spotify_raw)
+  
+  required_spotify_columns <- c(
+    "track_id",
+    "track_name",
+    "artists",
+    "popularity",
+    "danceability",
+    "energy",
+    "acousticness",
+    "valence"
+  )
+  
+  # analizzo se le colonne necessaire sono realmente prsenti
+  missing_spotify_columns <- setdiff(
+    required_spotify_columns,
+    names(spotify_raw)
+  )
+  
+  # Controlla se è stata trovata almeno una colonna mancante.
+  # Se tutte sono presenti missing_spotify_columns vuoto e lenght=0
+  if (length(missing_spotify_columns) > 0) {
+  
+  #Blocca se mancano le colonne necessarie
+    stop(
+      paste(
+        "Nel dataset Spotify mancano le colonne:",
+        paste(missing_spotify_columns, collapse = ", ")
+      )
+    )
+  }
+```
+
+## 3.3 Data Integration e Normalizzazione
+
+I due dataset non condividono un identificatore univoco. L'unione viene quindi effettuata usando titolo e artista principale. Prima del join vengono eliminate alcune indicazioni accessorie, per esempio "Remastered", "Live" e "feat.". La pulizia aumenta il numero di corrispondenze, ma può anche creare falsi abbinamenti; per questo viene mostrato un campione da controllare manualmente.
+
+### 3.3.1 Normalizzazione di titoli e nomi degli artisti
+
+Spotify e Genius non condividono una chiave primaria come un codice ISRC. L'integrazione deve quindi basarsi sulla combinazione fra titolo e artista principale.
+
+Prima del matching vengono rimosse soltanto le informazioni che identificano versioni alternative o collaborazioni, come `feat.`, `remastered`, `live` e `radio edit`. Non viene eliminato indiscriminatamente tutto il contenuto fra parentesi, perché una parentesi può essere parte legittima del titolo.
+
+```{r funzione_normalizzazione}
+# Definiamo la funzione che ricevento testo restituisca la versione normalizzata
+clean_field <- function(text) {
+
+  # Identifico "(" o "[" che di solito contengono info accerssiorie
+  # Alcuni esempi riconosciuti:
+  # (feat. Artist)
+  # [Live]
+  # (Remastered 2011)
+  # (Radio Edit)
+  # [Acoustic Version]
+  
+  #=== Codice generato secondo richiesta per filtro
+  removable_parenthetical <- regex(
+    paste0(
+      "\\s*[\\(\\[][^\\)\\]]*",
+      "(feat\\.?|ft\\.?|featuring|remaster(?:ed)?|live|",
+      "radio edit|deluxe|version|edit|acoustic|instrumental)",
+      "[^\\)\\]]*[\\)\\]]"
+    ),
+  #=== fine codice generato
+    ignore_case = TRUE
+  )
+  
+  #Converto testo in minuscolo e tolgo valori NA con stringa vuota
+  text <- replace_na(text, "")
+  text <- str_to_lower(text)
+
+  # Rimuove le parentesi soltanto quando contengono indicazioni accessorie trovate sopra
+  text <- str_replace_all(
+    text,
+    removable_parenthetical,
+    " "
+  )
+
+  # Rimuove indicazioni di versione collocate dopo un trattino
+  # Per esempio:
+  # "song title - remastered 2011"
+  # diventa:
+  # "song title"
+  # Consigliato dalla generazione di prima l'integrazione anche di questo
+  text <- str_replace_all(
+    text,
+    regex(
+      paste0(
+        "\\s+[-–—]\\s+",
+        "(remaster(?:ed)?|live|radio edit|deluxe|version|",
+        "edit|acoustic|instrumental).*$"
+      ),
+      ignore_case = TRUE
+    ),
+    " "
+  )
+
+  # Rimuove il featuring quando è inserito alla fine del titolo
+  text <- str_replace_all(
+    text,
+    regex(
+      "\\s+(feat\\.?|ft\\.?|featuring)\\s+.*$",
+      ignore_case = TRUE
+    ),
+    " "
+  )
+
+  # Uniforma il simbolo & sostituendolo con and
+  text <- str_replace_all(text, "&", " and ")
+
+  # Sostituisce la punteggiatura con spazi per evitare duplicati solo per diversa punteggiatura
+  text <- str_replace_all(text, "[[:punct:]]", " ")
+
+  # Elimina spazi ripetuti
+  text <- str_squish(text)
+
+  return(text)
+}
+```
+## 3.4 Preparazione di Spotify
+
+Per ogni brano viene individuato l'artista principale, corrispondente al primo elemento del campo `artists`. La rete conserverà tutti gli artisti, mentre l'artista principale viene utilizzato esclusivamente per il matching con Genius.
+
+```{r pulizia_spotify}
+
+
+spotify_clean <- spotify_raw %>%
+  filter(
+    !is.na(track_id),
+    !is.na(track_name),
+    !is.na(artists)
+  ) %>%
+  mutate(
+    first_artist = str_split_fixed(
+      artists,
+      ";",
+      2
+    )[, 1],
+
+    clean_title = clean_field(track_name),
+    clean_artist = clean_field(first_artist)
+  ) %>%
+  filter(
+    clean_title != "",
+    clean_artist != ""
+  )
+
+# Mantiene una sola riga per ogni track_id
+spotify_clean <- spotify_clean %>%
+  arrange(desc(popularity)) %>%
+  distinct(
+    track_id,
+    .keep_all = TRUE
+  )
+
+# Crea l'insieme delle chiavi Spotify utilizzabili per il matching
+spotify_keys <- spotify_clean %>%
+  distinct(
+    clean_title,
+    clean_artist
+  )
+
+cat(
+  "Brani Spotify dopo la pulizia:",
+  nrow(spotify_clean),
+  "\n"
+)
+
+cat(
+  "Chiavi titolo-artista Spotify:",
+  nrow(spotify_keys),
+  "\n"
+)
+```
+
+## 3.5 Lettura selettiva del dataset Genius
+
+Il dataset Genius è molto più grande del dataset Spotify. Estrarre un campione casuale prima del matching ridurrebbe fortemente la probabilità di trovare gli stessi brani presenti in Spotify.
+
+Per questo motivo il file Genius viene letto progressivamente a blocchi. In ogni blocco vengono:
+
+1. conservati soltanto i testi classificati come inglesi;
+2. normalizzati titolo e artista;
+3. conservate soltanto le righe che possiedono una chiave presente in Spotify.
+
+In questo modo viene analizzato l'intero file Genius senza doverlo mantenere interamente in memoria.
+
+
+
+## 3.6 De-duplicazione e integrazione Spotify–Genius
+
+Una stessa combinazione titolo-artista può comparire più volte in Genius. Quando sono disponibili più versioni viene conservata quella con il maggior numero di visualizzazioni, utilizzando `views` come criterio di selezione.
+
+```{r join_spotify_genius, message=FALSE}
+if (nrow(genius_candidates) == 0) {
+
+  stop(
+    paste(
+      "Nessuna corrispondenza Spotify-Genius trovata.",
+      "Controllare i nomi dei file e le colonne utilizzate."
+    )
+  )
+}
+
+# De-duplicazione Spotify per la chiave di join
+spotify_join <- spotify_clean %>%
+  arrange(desc(popularity)) %>%
+  distinct(
+    clean_title,
+    clean_artist,
+    .keep_all = TRUE
+  )
+
+# De-duplicazione Genius
+if ("views" %in% names(genius_candidates)) {
+
+  genius_join <- genius_candidates %>%
+    arrange(desc(replace_na(views, 0))) %>%
+    distinct(
+      clean_title,
+      clean_artist,
+      .keep_all = TRUE
+    )
+
+} else {
+
+  genius_join <- genius_candidates %>%
+    distinct(
+      clean_title,
+      clean_artist,
+      .keep_all = TRUE
+    )
+}
+
+# Join esatto sulle chiavi normalizzate
+merged_df <- spotify_join %>%
+  inner_join(
+    genius_join,
+    by = c(
+      "clean_title",
+      "clean_artist"
+    ),
+    suffix = c(
+      "_spotify",
+      "_genius"
+    ),
+    relationship = "one-to-one"
+  ) %>%
+  distinct(
+    track_id,
+    .keep_all = TRUE
+  ) %>%
+  mutate(
+    doc_id = row_number()
+  )
+```
+
+## 3.7 Valutazione del matching
+
+Il matching rate viene calcolato rispetto alle chiavi Spotify de-duplicate. Viene inoltre mostrato un campione casuale di associazioni per consentire una verifica manuale della qualità.
+
+```{r valutazione_matching}
+
+matching_summary <- tibble(
+  indicatore = c(
+    "Brani Spotify dopo pulizia",
+    "Chiavi Spotify deduplicate",
+    "Candidati Genius compatibili",
+    "Chiavi Genius deduplicate",
+    "Match finali Spotify-Genius",
+    "Matching rate rispetto a Spotify"
+  ),
+  #conta i valori rispettivi e separa le migliaglia
+  valore = c(
+    format(nrow(spotify_clean), big.mark = "."),
+    format(nrow(spotify_join), big.mark = "."),
+    format(nrow(genius_candidates), big.mark = "."),
+    format(nrow(genius_join), big.mark = "."),
+    format(nrow(merged_df), big.mark = "."),
+    percent(
+      nrow(merged_df) / nrow(spotify_join),
+      accuracy = 0.01
+    )
+  )
+)
+# Matching summary su tabella formattata
+kable(
+  matching_summary,
+  caption = "Qualità del matching Spotify–Genius"
+)
+```
+
+```{r controllo_manuale_matching}
+#decido di mostrare solo 30m corrispondenze(se meno mostro tutto)
+number_of_matches_to_check <- min(
+  30,
+  nrow(merged_df)
+)
+
+#Dal df con i match finali conservo solo colonne utili e le rinomino in quelle scelte
+matching_check <- merged_df %>%
+  select(
+    titolo_spotify = track_name,
+    artista_spotify = first_artist,
+    titolo_genius = title,
+    artista_genius = artist,
+    clean_title,
+    clean_artist
+  ) %>%
+  #ora estraggo in base al numero scelto sopra
+  slice_sample(
+    n = number_of_matches_to_check
+  )
+
+# foormatto per html
+kable(
+  matching_check,
+  caption = "Campione casuale delle corrispondenze Spotify–Genius"
+)
+```
+
+La qualità del matching viene valutata sia attraverso il numero complessivo di corrispondenze sia mediante l'ispezione manuale del campione riportato. L'analisi testuale viene considerata esplorativa quando il numero di testi allineati rimane contenuto.
+
+
+# 4. Network Science: Rete delle Collaborazioni
+
+## 4.1 Modellazione del Grafico
+
+La rete viene modellata come un grafo non orientato e pesato $G = (V, E, W)$ dove:
+
+- **Nodi (**$V$): Rappresentano i singoli artisti.
+- **Archi (**$E$): Rappresentano una collaborazione certificata in almeno un brano.
+- **Pesi (**$W$): il peso \(w_{ij}\) corrisponde al numero di brani nei quali gli artisti \(i\) e \(j\) compaiono insieme.
+
+La relazione viene quindi interpretata come una co-occorrenza nei crediti Spotify. Nella musica contemporanea essa corrisponde frequentemente a un featuring o a una collaborazione diretta. Nel caso della musica classica, di raccolte o reinterpretazioni, può invece rappresentare la relazione fra compositore, interprete, orchestra o altri soggetti accreditati.
+
+L'uso dei pesi permette di distinguere le associazioni occasionali dalle relazioni ripetute. Una coppia di artisti presente in numerosi brani avrà quindi un arco più forte rispetto a una coppia presente in un solo brano.
+
+## 4.2 Analisi delle Centralità e Primi Risultati
+
+L'applicazione delle metriche di Network Science ha lo scopo di tradurre la topografia del grafico in ruoli strutturali concreti all'interno del settore musicale:
+
+- **Weighted Degree (Strength)**: somma i pesi degli archi di un artista e misura il volume delle sue co-occorrenze.
+
+- **Betweenness Centrality**: identifica i nodi che si trovano spesso nei cammini minimi. Per ridurre i tempi di calcolo viene stimata soltanto sul nucleo dei 1.500 artisti con Strength maggiore. Nel report è quindi chiamata `core_betweenness` e non rappresenta l'intera rete.
+
+- **PageRank**: assegna un valore più alto ai nodi collegati ad altri nodi importanti. Non misura la qualità artistica, ma soltanto la posizione nella rete.
+
+- **Louvain**: divide la rete in comunità con molti collegamenti interni e meno collegamenti esterni. Le comunità possono riflettere generi, lingue o mercati musicali, ma questa interpretazione deve essere controllata osservando gli artisti presenti in ciascun gruppo.
+
+```{r costruzione_rete}
+# Estrazione di tutte le coppie uniche di artisti per ogni brano
+
+# creo una tabella con una riga per ogni artista di ogni brano.
+track_artists_long <- spotify_clean %>%
+  mutate(track_row = row_number()) %>%
+  select(track_row, track_id, artists) %>%
+  separate_longer_delim(artists, delim = ";") %>%
+  mutate(artist_clean = clean_field(artists)) %>%
+  filter(artist_clean != "") %>%
+  distinct(track_row, artist_clean)
+
+# genero tutte le coppie di artisti dello stesso brano
+collaboration_pairs <- inner_join(
+  track_artists_long,
+  track_artists_long,
+  by = "track_row",
+  relationship = "many-to-many"
+) %>%
+  #dopo il self joia abbiamo a,b e b,a, quindi la condizione < conserva solo una direzione ed elimina a,a 
+  filter(artist_clean.x < artist_clean.y) %>%
+  # creo la tabella fronìm a to b
+  transmute(
+    from = artist_clean.x,
+    to = artist_clean.y
+  )
+
+#conto quante volte compare ogni coppia e lo salvo su weight
+collaborations <- collaboration_pairs %>%
+  count(from, to, name = "weight") %>%
+  filter(from != to) # risetto filtro a<b solo per sicurezza
+
+# Creazione dell'oggetto igraph non orientato
+net_graph <- graph_from_data_frame(
+  d = collaborations,
+  directed = FALSE #not oriented: a->b == b->a
+)
+
+E(net_graph)$weight <- collaborations$weight #assegno agli archi i pesi
+
+cat("Topologia della Rete:\n")
+cat("- Numero di nodi (Artisti):", vcount(net_graph), "\n")
+cat("- Numero di archi (Collaborazioni):", ecount(net_graph), "\n")
+```
+
+```{r centralita_rete}
+# Strength / Grado Pesato
+weighted_degree <- strength(
+  net_graph,
+  mode = "all",
+  weights = E(net_graph)$weight
+)
+
+# PageRank ponderato
+weighted_pagerank <- page_rank(
+  net_graph,
+  directed = FALSE,
+  weights = E(net_graph)$weight
+)$vector #estragggo solo il punteggio
+
+# Algoritmo di Louvain per clustering della rete
+louvain_model <- cluster_louvain(
+  net_graph,
+  weights = E(net_graph)$weight
+)
+
+# Betweenness pesata calcolata sul nucleo piu' collaborativo per evitare tempi eccessivi
+core_artists_for_betweenness <- names(sort(weighted_degree, decreasing = TRUE)) %>%
+  head(2500)
+#costruisco sottografo limitato ai 2500 artisti selezionati
+core_graph_for_betweenness <- induced_subgraph(
+  net_graph,
+  vids = V(net_graph)$name %in% core_artists_for_betweenness
+)
+# Calcola la betweenness nel sottografo
+core_betweenness <- betweenness(
+  core_graph_for_betweenness,
+  directed = FALSE,
+  weights = 1 / E(core_graph_for_betweenness)$weight,#igraph interpreta pesi come distanze, ma nel nostro proj peso alto=relazione forte quindi devo fare reciproco
+  normalized = TRUE
+)
+
+weighted_betweenness <- rep(NA_real_, vcount(net_graph)) #setto na per gli artisti esterni
+names(weighted_betweenness) <- V(net_graph)$name
+weighted_betweenness[names(core_betweenness)] <- as.numeric(core_betweenness)
+
+# Estrazione del dataframe dei nodi per analisi tabulari e join successivi
+nodes_summary <- tibble(
+  name = names(weighted_degree),
+  weighted_degree = as.numeric(weighted_degree),
+  core_betweenness = as.numeric(weighted_betweenness),
+  pagerank = as.numeric(weighted_pagerank),
+  community = as.factor(membership(louvain_model))
+) %>%
+  arrange(desc(weighted_degree))
+
+# Visualizziamo i 10 artisti più centrali per Weighted Degree
+kable(head(nodes_summary, 10), digits = 5, caption = "Top 10 Artisti per Volume di Collaborazioni (Strength)")
+```
+
+## 4.3 Correlazione tra le misure di centralità
+
+Le centralità di una rete musicale presentano normalmente distribuzioni fortemente asimmetriche: molti artisti possiedono valori bassi, mentre pochi hub raggiungono valori molto elevati. Per questa ragione viene utilizzata la correlazione di rango di Spearman, meno sensibile ai valori estremi e adatta a relazioni monotone non necessariamente lineari.
+
+La correlazione viene calcolata soltanto sugli artisti appartenenti al nucleo utilizzato per la `core_betweenness`.
+
+```{r correlazione_centralita}
+#tabella Nodes_summary con misure di centralità xogni artista per cui disp core_betw (2500)
+cor_data <- nodes_summary %>%
+  filter(
+    !is.na(core_betweenness)
+  ) %>%
+  select( #conservo solo le 3 di cui voglio confronto
+    weighted_degree,
+    core_betweenness,
+    pagerank
+  )
+
+cor_matrix <- cor(
+  cor_data,
+  use = "pairwise.complete.obs", #Calcola correlazione usando tutte coppie valori disponibili per le due variabili considerate per evitare che val mancante elimini la riga da altre correlazioni
+  method = "spearman"
+)
+
+corrplot(
+  cor_matrix,
+  method = "circle",
+  type = "upper",
+  addCoef.col = "black",
+  number.cex = 0.66,
+  tl.col = "black",
+  tl.srt = 45,
+  title = "Correlazioni di Spearman tra le centralità",
+  mar = c(0, 0, 2, 0)
+)
+```
+
+Valori elevati indicano che le metriche tendono a ordinare gli artisti in modo simile. Una correlazione inferiore suggerisce invece che le metriche catturano ruoli strutturali differenti: la Strength misura il volume delle collaborazioni, PageRank considera l'autorevolezza dei vicini e la `core_betweenness` individua possibili intermediari nel nucleo della rete.
+
+## 4.4 Visualizzazione Grafica della Rete
+
+Per rendere leggibile il grafo, estraiamo la componente connessa principale o filtriamo i nodi con una soglia minima di grado pesato prima del rendering
+
+```{r visualizzazione_rete}
+# Filtriamo un sottografo per evidenziare il nucleo centrale (150 artisti con maggiore strenght)
+top_artists_for_plot <- nodes_summary %>%
+  slice_max(weighted_degree, n = 150) %>%
+  pull(name)
+
+#Creo ora un sottografo con solo gli artisti precedentemente selezionati e i relativi archi
+sub_graph <- induced_subgraph(
+  net_graph,
+  vids = V(net_graph)$name %in% top_artists_for_plot
+)
+
+#Ora filtro lemetriche per i soli nodi del sottografo
+plot_node_metrics <- nodes_summary %>%
+  filter(name %in% V(sub_graph)$name)
+
+#Assegno Weighted e Community ai vertici per ottenere un ordine tramite match()
+V(sub_graph)$weighted_degree <- plot_node_metrics$weighted_degree[
+  match(V(sub_graph)$name, plot_node_metrics$name)
+]
+V(sub_graph)$community <- plot_node_metrics$community[
+  match(V(sub_graph)$name, plot_node_metrics$name)
+]
+
+#Assegno il layout con Fruchterman-Reingold pesato sui pesi degli archi
+layout_matrix <- layout_with_fr(sub_graph, weights = E(sub_graph)$weight)
+
+#Converto matrix delle coordinate e vi associo i metadati del nodo
+node_positions <- as_tibble(layout_matrix, .name_repair = "minimal") %>%
+  set_names(c("x", "y")) %>%
+  mutate(
+    name = V(sub_graph)$name,
+    weighted_degree = V(sub_graph)$weighted_degree,
+    community = V(sub_graph)$community
+  )
+
+#Estaggo archi e unisco x y tramite join (da from a to)
+edge_positions <- as_data_frame(sub_graph, what = "edges") %>%
+  left_join(node_positions %>% select(name, x, y), by = c("from" = "name")) %>%
+  rename(x_from = x, y_from = y) %>%
+  left_join(node_positions %>% select(name, x, y), by = c("to" = "name")) %>%
+  rename(x_to = x, y_to = y)
+
+#Funzione di render
+ggplot() +
+  geom_segment( #Proporziono gli archi al peso della collabo
+    data = edge_positions,
+    aes(x = x_from, y = y_from, xend = x_to, yend = y_to, linewidth = weight),
+    alpha = 0.35,
+    color = "gray60"
+  ) +
+  geom_point( #Proporziono i nodi con dimensione in base strwenght e colore dato da community
+    data = node_positions,
+    aes(x = x, y = y, size = weighted_degree, color = community),
+    alpha = 0.85
+  ) +
+  geom_text(#print solo i 20 nodi principali per evitare overlap
+    data = node_positions %>% slice_max(weighted_degree, n = 35),
+    aes(x = x, y = y, label = name),
+    size = 3,
+    vjust = -0.8,
+    check_overlap = TRUE
+  ) +
+  scale_linewidth(range = c(0.3, 1.8), guide = "none") +
+  scale_size(range = c(2.5, 9)) +
+  theme_void() +
+  labs(
+    title    = "Grafico Ponderato delle Collaborazioni Musicali",
+    subtitle = "Dimensione nodo = Weighted Degree | Colore = Comunità Louvain",
+    size     = "Strength (Peso)",
+    color    = "Comunità"
+  )
+
+```
+
+## 4.5 Profilo Musicale delle Comunità
+
+Per evitare di attribuire alle community Louvain significati non verificati, descriviamo i gruppi principali usando gli artisti più centrali e le caratteristiche Spotify medie dei brani associati agli artisti primari. 
+Questo sistema ci permette di stimare i generi delle community, seppur in maniera abbastanza artificiosa.
+
+```{r profilo_community}
+community_labels <- nodes_summary %>%
+  arrange(community,
+          desc(weighted_degree)
+          ) %>%
+  # Ordino 1a artisti per community poi dentro dalla Strength > alla <
+  
+  group_by(community) %>%
+  summarise( #Creo una riga riassuntiva per ogni community
+    top_artists = paste(
+      head(name, 4),
+      collapse = ", "
+      ),#con questo creo una striga con 4 nomi separati da ,
+    artists_in_community = n(),
+    .groups = "drop" #elimino raggrupp
+  )
+
+spotify_artist_tracks <- spotify_clean %>%
+  left_join(nodes_summary, by = c("clean_artist" = "name")) %>% #clean è art principale
+  filter(!is.na(community)) #e lascio solo dove esso è nella rete e possiede community
+
+community_music_profile <- spotify_artist_tracks %>%
+  group_by(community) %>%
+  summarise(
+    brani_spotify = n_distinct(track_id), #conto i brani distinti associati
+    
+    popularity_media = mean(popularity, na.rm = TRUE),
+    danceability_media = mean(danceability, na.rm = TRUE),
+    energy_media = mean(energy, na.rm = TRUE),
+    acousticness_media = mean(acousticness, na.rm = TRUE),
+    valence_media = mean(valence, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  # Aggiunge alla tabella 4 artisti principali e n di artisti nel community poi ordino in base > n di brani
+  left_join(community_labels, by = "community") %>%
+  arrange(desc(brani_spotify))
+
+
+#con questo tengo solo le 15 comm princ
+community_music_profile_top <- head(community_music_profile, 15)
+
+#arrotonda le medie a tre cifre decimali
+community_music_profile_top$brani_spotify <- round(community_music_profile_top$brani_spotify, 3) #inutile dato che a n intero... da togliere
+community_music_profile_top$popularity_media <- round(community_music_profile_top$popularity_media, 3)
+community_music_profile_top$danceability_media <- round(community_music_profile_top$danceability_media, 3)
+community_music_profile_top$energy_media <- round(community_music_profile_top$energy_media, 3)
+community_music_profile_top$acousticness_media <- round(community_music_profile_top$acousticness_media, 3)
+community_music_profile_top$valence_media <- round(community_music_profile_top$valence_media, 3)
+ 
+kable(
+  community_music_profile_top,
+  caption = "Profilo musicale descrittivo delle principali community Louvain"
+)
+```
+
+
+
+# 5. Text Mining e Topic Modeling
+
+## 5.1 Definizione e pulizia del corpus
+
+L'analisi testuale usa soltanto i brani inglesi che è stato possibile collegare tra Spotify e Genius. Limitarsi a una lingua riduce il rischio che LDA separi i testi solamente in base alla lingua anziché al contenuto.
+
+Prima della tokenizzazione vengono rimossi gli elementi editoriali più comuni di Genius: intestazioni tra parentesi quadre, link e parole come `Embed`.
+
+```{r pulizia_corpus}
+#== generato da Chatgpt per pulizia di intestazioni "dato il progetto trovami il modo di rimuovere le parti del dataset GEnius che presentano link e altre aggiunte tipiche di esso, scrivi in R"
+
+lyrics_docs <- merged_df %>%
+  distinct(
+    track_id,
+    .keep_all = TRUE
+  ) %>%
+  mutate(
+    clean_lyrics = lyrics %>%
+      str_remove_all("\\[[^]]*\\]") %>%
+      str_remove_all("https?://\\S+|www\\.\\S+") %>%
+      str_remove_all(
+        regex(
+          "you might also like|embed",
+          ignore_case = TRUE
+        )
+      ) %>%
+      str_to_lower() %>%
+      str_squish()
+  ) %>%
+  select(
+    doc_id,
+    track_id,
+    track_name,
+    artists,
+    first_artist,
+    clean_artist,
+    popularity,
+    track_genre,
+    danceability,
+    energy,
+    acousticness,
+    valence,
+    clean_lyrics
+  ) %>%
+  filter(
+    !is.na(clean_lyrics),
+    str_length(clean_lyrics) >= 200
+  )
+
+cat(
+  "Documenti disponibili prima della tokenizzazione:",
+  nrow(lyrics_docs),
+  "\n"
+)
+```
+
+## 5.2 Tokenizzazione e rimozione delle stopword
+
+Alle stopword inglesi standard vengono aggiunte alcune intestazioni e vocalizzazioni frequenti nei testi. Queste parole sono state escluse perché compaiono spesso ma non descrivono il tema di un brano.
+
+```{r tokenizzazione}
+#Sfrutto il codice precedentemente generato, modificandolo per quello che mi serve per questo caso
+custom_stop_words <- tibble(
+  word = c(
+    "verse",
+    "chorus",
+    "bridge",
+    "intro",
+    "outro",
+    "lyrics",
+    "embed",
+    "yeah",
+    "ooh",
+    "ohh",
+    "ayy",
+    "aye",
+    "uhh",
+    "whoa",
+    "woah",
+    "gonna",
+    "wanna",
+    "gotta",
+    "cause",
+    "repeat",
+    "ye",
+    "brr"
+  )
+)
+
+all_stop_words <- stop_words %>%
+  select(word) %>%
+  bind_rows(custom_stop_words) %>%
+  distinct(word)
+
+lyrics_tokens <- lyrics_docs %>%
+  select(
+    doc_id,
+    clean_lyrics
+  ) %>%
+  unnest_tokens(
+    word,
+    clean_lyrics,
+    token = "words"
+  ) %>%
+  filter(
+    str_detect(word, "^[a-z]+$"),
+    str_length(word) >= 3,
+    str_length(word) <= 25
+  ) %>%
+  anti_join(
+    all_stop_words,
+    by = "word"
+  )
+```
+
+## 5.3 Frequenza documentale e Document-Term Matrix
+
+Le parole presenti in meno di cinque testi vengono eliminate perché sono troppo rare per descrivere temi ricorrenti. Se il corpus contiene meno di 100 testi, la soglia viene ridotta a tre. Vengono inoltre rimosse le parole presenti in oltre l'80% dei testi, perché distinguono poco i documenti.
+
+Queste soglie sono scelte operative adatte a questo corpus e non valori obbligatori per ogni analisi LDA.
+
+```{r document_term_matrix}
+
+#Conto numero di testi dopo tokeniz
+number_of_documents <- n_distinct(
+  lyrics_tokens$doc_id
+)
+#stabilisco una frequenza minima per una parola 5:100
+minimum_document_frequency <- if_else(
+  number_of_documents >= 100,
+  5,
+  3
+)
+#Calcolo in quanti doc compare la parola tenendo una sola occorrenza per doc (se x viene citato anche 10 volte nella stassa canzone lo conto 1 per documento)
+document_frequency <- lyrics_tokens %>%
+  distinct(
+    doc_id,
+    word
+  ) %>%
+  count(
+    word,
+    name = "documents_with_word"
+  )
+
+# Seleziona le parole considerate utili per l'analisi.
+valid_words <- document_frequency %>%
+  filter(
+    documents_with_word >= minimum_document_frequency,
+    documents_with_word <= 0.80 * number_of_documents #estraggo quelle troppo usate
+  ) %>%
+  pull(word)
+
+#tab con solo parole filtrate
+lyrics_tokens_filtered <- lyrics_tokens %>%
+  filter(
+    word %in% valid_words # %in% controlla se ogni parola è nell elenco valid_words
+  ) %>%
+  count( # Conta quante volte ogni parola compare in ciascun documento
+    doc_id,
+    word,
+    name = "n"
+  )
+# Trasforma la tabella in una Document-Term Matrix dove righe =nome documenti e colonne =parole celle numero di occorrenze della parola
+dtm <- lyrics_tokens_filtered %>%
+  cast_dtm(
+    document = doc_id,
+    term = word,
+    value = n
+  )
+
+dtm_summary <- tibble(
+  metrica = c(
+    "Documenti originali",
+    "Documenti nella DTM",
+    "Termini nella DTM",
+    "Celle non nulle",
+    "Frequenza documentale minima"
+  ),
+  valore = c(
+    nrow(lyrics_docs),
+    nrow(dtm),
+    ncol(dtm),
+    length(dtm$v),
+    minimum_document_frequency
+  )
+)
+
+kable(
+  dtm_summary,
+  caption = "Caratteristiche della Document-Term Matrix"
+)
+```
+
+```{r controllo_dtm}
+if (nrow(dtm) < 30) {
+  stop("La DTM contiene meno di 30 documenti: il corpus è troppo piccolo per questa analisi.")
+}
+
+if (ncol(dtm) < 50) {
+  stop("La DTM contiene meno di 50 termini: il vocabolario è troppo piccolo per questa analisi.")
+}
+```
+
+## 5.4 Scelta del numero di topic
+
+I documenti vengono divisi casualmente in training set (80%) e test set (20%). Per ogni valore candidato di (k), LDA viene addestrato sul training set e valutato sul test set tramite perplexity. Un valore più basso indica una migliore capacità di rappresentare documenti non usati nell'addestramento.
+
+La perplexity seleziona soltanto il risultato migliore tra i valori provati. In questo caso diminuisce fino a (k=10), che è anche il massimo candidato: non è quindi possibile affermare che 10 sia il numero ottimale in assoluto. La leggibilità dei topic deve essere controllata dopo la stima.
+
+```{r divisione_training_test}
+
+# Recuperiamo i nomi identificativi di tutti i documenti presenti nella DTM
+all_document_names <- dimnames(dtm)$Docs
+
+# Calcoliamo quanti documenti utilizzare per il training set.
+# L'80% dei documenti viene utilizzato per addestrare LDA.
+training_size <- floor(
+  0.80 * length(all_document_names)
+)
+
+# Estraiamo casualmente i documenti del training set
+training_document_names <- sample(
+  all_document_names,
+  size = training_size,
+  replace = FALSE
+)
+
+# I documenti non selezionati per il training formano il test set
+test_document_names <- setdiff(
+  all_document_names,
+  training_document_names
+)
+
+# Creiamo la DTM di training selezionando le righe corrispondenti
+training_dtm <- dtm[
+  training_document_names,
+]
+
+# Creiamo la DTM di test selezionando le righe rimanenti
+test_dtm <- dtm[
+  test_document_names,
+]
+
+training_test_summary <- tibble(
+  insieme = c("Training set", "Test set"),
+  documenti = c(nrow(training_dtm), nrow(test_dtm)),
+  percentuale = c(nrow(training_dtm), nrow(test_dtm)) / nrow(dtm)
+)
+
+kable(
+  training_test_summary,
+  digits = 3,
+  caption = "Divisione dei documenti fra training set e test set"
+)
+```
+
+```{r confronto_numero_topic}
+candidate_k <- c(3, 4, 5, 6, 8, 10)
+
+# Il numero di topic non può essere eccessivo rispetto ai documenti
+candidate_k <- candidate_k[
+  candidate_k < nrow(training_dtm)
+]
+
+lda_comparison <- tibble(
+  k = candidate_k,
+  perplexity = NA_real_
+)
+
+for (i in seq_along(candidate_k)) {
+  current_model <- LDA(
+    training_dtm,
+    k = candidate_k[i],
+    method = "Gibbs",
+    control = list(seed = 1234, burnin = 500, iter = 1500, thin = 100)
+  )
+
+  lda_comparison$perplexity[i] <- perplexity(
+    current_model,
+    newdata = test_dtm
+  )
+}
+
+kable(
+  lda_comparison,
+  digits = 2,
+  caption = "Confronto del numero di topic mediante perplexity"
+)
+```
+
+```{r grafico_perplexity}
+ggplot(
+  lda_comparison,
+  aes(
+    x = k,
+    y = perplexity
+  )
+) +
+  geom_line(
+    linewidth = 1,
+    color = "#2C7FB8"
+  ) +
+  geom_point(
+    size = 3,
+    color = "#2C7FB8"
+  ) +
+  scale_x_continuous(
+    breaks = candidate_k
+  ) +
+  theme_minimal() +
+  labs(
+    title = "Scelta del numero di topic",
+    subtitle = "Perplexity calcolata sul test set",
+    x = "Numero di topic",
+    y = "Perplexity"
+  )
+```
+
+## 5.5 Addestramento del modello definitivo
+
+Il numero di topic con la perplexity più bassa (k) viene utilizzato per addestrare il modello definitivo sull'intera DTM.
+
+```{r modello_lda_definitivo}
+selected_k <- lda_comparison %>%
+  slice_min(
+    perplexity,
+    n = 1,
+    with_ties = FALSE
+  ) %>%
+  pull(k)
+
+cat(
+  "Numero di topic selezionato:",
+  selected_k,
+  "\n"
+)
+
+set.seed(1234)
+
+lda_model <- LDA(
+  dtm,
+  k = selected_k,
+  method = "Gibbs",
+  control = list(
+    seed = 1234,
+    burnin = 1000,
+    iter = 2000,
+    thin = 100
+  )
+)
+
+topic_beta <- tidy(
+  lda_model,
+  matrix = "beta"
+)
+
+topic_gamma <- tidy(
+  lda_model,
+  matrix = "gamma"
+)
+```
+
+## 5.6 Interpretazione dei topic
+
+Il parametro \(\beta\) rappresenta la probabilità di una parola dato un topic:
+
+\[
+\beta_{kw}=P(w\mid k)
+\]
+
+Le parole con \(\beta\) maggiore aiutano a interpretare il contenuto del topic, ma l'etichetta finale richiede una valutazione manuale.
+
+```{r termini_principali_topic}
+topic_terms <- topic_beta %>%
+  group_by(topic) %>%
+  slice_max(beta, n = 15, with_ties = FALSE) %>%
+  ungroup() %>%
+  arrange(topic, desc(beta))
+
+topic_terms_table <- topic_terms %>%
+  group_by(topic) %>%
+  summarise(top_terms = paste(term, collapse = ", "), .groups = "drop")
+
+kable(
+  topic_terms_table,
+  caption = "Le quindici parole più caratteristiche di ciascun topic"
+)
+```
+
+```{r grafico_termini_topic}
+topic_terms %>%
+  mutate(
+    term = reorder_within(
+      term,
+      beta,
+      topic
+    )
+  ) %>%
+  ggplot(
+    aes(
+      x = beta,
+      y = term,
+      fill = factor(topic)
+    )
+  ) +
+  geom_col(
+    show.legend = FALSE
+  ) +
+  scale_y_reordered() +
+  facet_wrap(
+    ~ topic,
+    scales = "free_y"
+  ) +
+  theme_minimal() +
+  labs(
+    title = "Termini più rappresentativi dei topic LDA",
+    x = "Beta: probabilità del termine nel topic",
+    y = NULL
+  )
+```
+
+Le etichette dei topic vengono costruite utilizzando le quattro parole più caratteristiche. Tali etichette hanno una funzione descrittiva e non sostituiscono l'interpretazione semantica del ricercatore.
+
+```{r etichette_topic}
+topic_labels <- topic_terms %>%
+  group_by(topic) %>%
+  summarise(
+    topic_words = paste(head(term, 4), collapse = ", "),
+    .groups = "drop"
+  ) %>%
+  mutate(topic_label = paste0("Topic ", topic, ": ", topic_words))
+
+kable(topic_labels, caption = "Promemoria basati sulle prime quattro parole")
+```
+
+## 5.7 Identificazione post hoc dei topic tecnologici
+
+Il dizionario seguente non modifica l'addestramento di LDA. Dopo la stima viene calcolata, per ogni topic, la somma delle probabilità (eta) assegnate alle parole tecnologiche.
+
+Il valore ottenuto è soltanto un **proxy relativo**. Il topic con il punteggio più alto è più vicino al dizionario rispetto agli altri topic, ma non diventa automaticamente un “topic tecnologico”. Nei risultati attuali il Topic 2 ha il valore più alto, ma le sue parole principali non descrivono un tema tecnologico autonomo.
+
+```{r lessico_tecnologico}
+digital_seed_words <- c(
+  "digital",
+  "technology",
+  "technological",
+  "tech",
+  "robot",
+  "robotic",
+  "computer",
+  "online",
+  "internet",
+  "screen",
+  "phone",
+  "smartphone",
+  "machine",
+  "data",
+  "code",
+  "coding",
+  "virtual",
+  "cyber",
+  "electric",
+  "electronic",
+  "signal",
+  "network",
+  "software",
+  "algorithm",
+  "application",
+  "video",
+  "system",
+  "device",
+  "cloud",
+  "pixel",
+  "website",
+  "wifi",
+  "wireless",
+  "automation",
+  "automated",
+  "artificial",
+  "intelligence"
+)
+
+digital_terms_in_model <- intersect(digital_seed_words, unique(topic_beta$term))
+technology_words_available <- length(digital_terms_in_model) > 0
+
+digital_topic_score <- topic_beta %>%
+  group_by(topic) %>%
+  summarise(
+    digital_beta_mass = sum(beta[term %in% digital_seed_words]),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(digital_beta_mass))
+
+kable(
+  digital_topic_score,
+  digits = 8,
+  caption = "Massa beta delle parole tecnologiche per topic"
+)
+
+```
+
+```{r selezione_topic_tecnologico}
+if (technology_words_available) {
+  technology_proxy_topic <- digital_topic_score$topic[1]
+  maximum_digital_mass <- digital_topic_score$digital_beta_mass[1]
+  second_digital_mass <- digital_topic_score$digital_beta_mass[2]
+  digital_mass_ratio <- maximum_digital_mass / second_digital_mass
+
+  cat("Topic relativamente più vicino al dizionario:", technology_proxy_topic, "\n")
+  cat("Rapporto tra il primo e il secondo punteggio:", round(digital_mass_ratio, 2), "\n")
+} else {
+  technology_proxy_topic <- NA_integer_
+  maximum_digital_mass <- 0
+  second_digital_mass <- 0
+  digital_mass_ratio <- NA_real_
+
+  cat("Nessuna parola del dizionario è presente nella DTM.\n")
+}
+```
+
+## 5.8 Topic dominante per brano
+
+Il parametro \(\gamma\) indica la probabilità di un topic dato un documento, \(P(k\mid d)\). Per ogni brano viene conservato il topic con \(\gamma\) maggiore.
+Viene inoltre salvata la probabilità del topic relativamente più vicino al dizionario tecnologico; anche questa variabile è un proxy e non una classificazione certa del brano.
+
+```{r topic_dominante}
+dominant_topics <- topic_gamma %>%
+  group_by(document) %>%
+  slice_max(gamma, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  transmute(
+    doc_id = as.integer(document),
+    dominant_topic = topic,
+    dominant_gamma = gamma
+  )
+
+song_topics <- lyrics_docs %>%
+  left_join(dominant_topics, by = "doc_id") %>%
+  left_join(topic_labels, by = c("dominant_topic" = "topic"))
+
+if (technology_words_available) {
+  technology_proxy_values <- topic_gamma %>%
+    filter(topic == technology_proxy_topic) %>%
+    transmute(
+      doc_id = as.integer(document),
+      technology_proxy_gamma = gamma
+    )
+
+  song_topics <- left_join(song_topics, technology_proxy_values, by = "doc_id")
+} else {
+  song_topics$technology_proxy_gamma <- NA_real_
+}
+
+song_topics <- song_topics %>%
+  mutate(
+    dominant_topic = factor(dominant_topic),
+    topic_label = factor(topic_label)
+  )
+
+song_topics %>%
+  count(topic_label, sort = TRUE) %>%
+  kable(caption = "Numero di brani per topic dominante")
+```
+
+# 6. Integrazione fra rete, topic e popolarità
+
+## 6.1 Collegamento dei testi a tutti gli artisti
+
+Un brano con più artisti contribuisce al profilo testuale di ciascun artista accreditato. Restano però soltanto gli artisti presenti nella rete: poiché il grafo è costruito dalle co-occorrenze, gli artisti osservati esclusivamente in brani solisti non possiedono una community e vengono esclusi da questa integrazione.
+
+```{r integrazione_artisti}
+integrated_df <- song_topics %>%
+  separate_longer_delim(
+    artists,
+    delim = ";"
+  ) %>%
+  mutate(
+    artist_name = str_squish(artists),
+    artist_network_name = clean_field(
+      artist_name
+    )
+  ) %>%
+  filter(
+    artist_network_name != ""
+  ) %>%
+  distinct(
+    doc_id,
+    artist_network_name,
+    .keep_all = TRUE
+  ) %>%
+  left_join(
+    nodes_summary,
+    by = c(
+      "artist_network_name" = "name"
+    )
+  ) %>%
+  filter(
+    !is.na(community),
+    !is.na(dominant_topic)
+  )
+
+cat(
+  "Associazioni brano-artista integrate:",
+  nrow(integrated_df),
+  "\n"
+)
+
+cat(
+  "Artisti distinti con almeno un testo:",
+  n_distinct(integrated_df$artist_network_name),
+  "\n"
+)
+```
+
+## 6.2 Distribuzione dei topic nelle comunità Louvain
+
+Per rendere il confronto più stabile e leggibile vengono considerate le 15 community con più testi tra quelle associate ad almeno 30 brani distinti. Un brano con artisti appartenenti a community diverse può contribuire a più gruppi.
+
+```{r topic_community}
+community_document_counts <- integrated_df %>%
+  group_by(
+    community
+    ) %>%
+  summarise(
+    community_documents = n_distinct(doc_id),
+    .groups = "drop"
+  ) %>%
+  filter(
+    community_documents >= 5
+  )
+
+community_topic_summary <- integrated_df %>%
+  semi_join(
+    community_document_counts,
+            by = "community"
+    ) %>%
+  distinct(
+    community,
+    doc_id,
+    topic_label
+    ) %>%
+  count(
+    community,
+    topic_label,
+    name = "documents"
+    ) %>%
+  group_by(
+    community
+    ) %>%
+  mutate(
+    topic_share = documents / sum(documents)
+    ) %>%
+  ungroup()
+
+kable(
+  community_topic_summary,
+  digits = 3,
+  caption = "Distribuzione dei topic nelle community con almeno cinque brani"
+)
+```
+
+```{r grafico_topic_community}
+if (nrow(community_topic_summary) > 0) {
+
+  ggplot(
+    community_topic_summary,
+    aes(
+      x = factor(community),
+      y = topic_share,
+      fill = topic_label
+    )
+  ) +
+    geom_col() +
+    scale_y_continuous(
+      labels = percent_format()
+    ) +
+    theme_minimal() +
+    labs(
+      title = "Distribuzione dei topic nelle comunità Louvain",
+      x = "Comunità",
+      y = "Quota di associazioni testuali",
+      fill = "Topic"
+    )
+
+} else {
+
+  cat(
+    "Nessuna comunità possiede almeno cinque documenti distinti.\n"
+  )
+}
+```
+
+## 6.3 Aggregazione per artista
+
+Le variabili testuali vengono riassunte per artista. Vengono considerati nelle analisi di correlazione soltanto gli artisti associati ad almeno due brani, in modo da evitare che un singolo testo rappresenti l'intera produzione osservata di un artista.
+
+```{r aggregazione_artista}
+artist_text_summary <- integrated_df %>%
+  group_by(
+    artist_network_name
+  ) %>%
+  summarise(
+    matched_songs = n_distinct(doc_id),
+
+    mean_popularity = mean(
+      popularity,
+      na.rm = TRUE
+    ),
+
+    mean_dominant_confidence = mean(
+      dominant_gamma,
+      na.rm = TRUE
+    ),
+
+    mean_technology_proxy = if (
+      all(is.na(technology_proxy_gamma))
+    ) {
+      NA_real_
+    } else {
+      mean(
+        technology_proxy_gamma,
+        na.rm = TRUE
+      )
+    },
+
+    weighted_degree = first(
+      weighted_degree
+    ),
+
+    core_betweenness = first(
+      core_betweenness
+    ),
+
+    pagerank = first(
+      pagerank
+    ),
+
+    community = first(
+      community
+    ),
+
+    .groups = "drop"
+  ) %>%
+  filter(
+    matched_songs >= 2
+  )
+
+kable(
+  head(
+    artist_text_summary %>%
+      arrange(
+        desc(matched_songs)
+      ),
+    20
+  ),
+  digits = 5,
+  caption = "Artisti con il maggior numero di testi allineati"
+)
+```
+
+## 6.4 Centralità e temi tecnologici
+
+Le correlazioni di Spearman vengono calcolate soltanto se nel vocabolario sono presenti parole del dizionario tecnologico e sono disponibili almeno dieci artisti con dati completi. Spearman è usato perché le centralità hanno distribuzioni asimmetriche. Valori vicini a zero indicano assenza di una relazione monotona rilevante.
+
+```{r correlazioni_tecnologia}
+enough_technology_data <-
+  technology_words_available &&
+  sum(!is.na(artist_text_summary$mean_technology_proxy)) >= 10
+
+if (enough_technology_data) {
+  technology_correlations <- tibble(
+    metrica = c("Strength", "Core betweenness", "PageRank", "Popolarità media"),
+    correlazione_spearman = c(
+      cor(
+        artist_text_summary$mean_technology_proxy,
+        artist_text_summary$weighted_degree,
+        method = "spearman", use = "complete.obs"
+      ),
+      cor(
+        artist_text_summary$mean_technology_proxy,
+        artist_text_summary$core_betweenness,
+        method = "spearman", use = "complete.obs"
+      ),
+      cor(
+        artist_text_summary$mean_technology_proxy,
+        artist_text_summary$pagerank,
+        method = "spearman", use = "complete.obs"
+      ),
+      cor(
+        artist_text_summary$mean_technology_proxy,
+        artist_text_summary$mean_popularity,
+        method = "spearman", use = "complete.obs"
+      )
+    )
+  )
+
+  print(kable(
+    technology_correlations,
+    digits = 4,
+    caption = "Correlazioni di Spearman con il proxy tecnologico"
+  ))
+} else {
+  cat("Dati insufficienti per calcolare le correlazioni con il proxy tecnologico.\n")
+}
+```
+
+```{r grafico_centralita_tecnologia}
+if (
+  technology_words_available &&
+  sum(!is.na(artist_text_summary$mean_technology_proxy)) >= 10
+) {
+
+  ggplot(
+    artist_text_summary,
+    aes(
+      x = log1p(weighted_degree),
+      y = mean_technology_proxy
+    )
+  ) +
+    geom_point(
+      aes(
+        size = matched_songs
+      ),
+      alpha = 0.50,
+      color = "#2C7FB8"
+    ) +
+    geom_smooth(
+      method = "lm",
+      se = TRUE,
+      color = "#D7301F"
+    ) +
+    theme_minimal() +
+    labs(
+      title = "Strength e presenza del topic tecnologico",
+      x = "log(1 + Strength)",
+      y = "Probabilità media del topic tecnologico",
+      size = "Brani analizzati"
+    )
+}
+```
+
+## 6.5 Topic, popolarità e caratteristiche acustiche
+
+Le medie seguenti descrivono le differenze osservate fra i topic. Non sono test causali e non dimostrano che un contenuto produca maggiore popolarità.
+
+```{r topic_popolarita_audio}
+topic_audio_popularity <- song_topics %>%
+  filter(
+    !is.na(topic_label)
+  ) %>%
+  group_by(
+    topic_label
+  ) %>%
+  summarise(
+    songs = n_distinct(track_id),
+
+    mean_popularity = mean(
+      popularity,
+      na.rm = TRUE
+    ),
+
+    median_popularity = median(
+      popularity,
+      na.rm = TRUE
+    ),
+
+    mean_danceability = mean(
+      danceability,
+      na.rm = TRUE
+    ),
+
+    mean_energy = mean(
+      energy,
+      na.rm = TRUE
+    ),
+
+    mean_acousticness = mean(
+      acousticness,
+      na.rm = TRUE
+    ),
+
+    mean_valence = mean(
+      valence,
+      na.rm = TRUE
+    ),
+
+    .groups = "drop"
+  ) %>%
+  arrange(
+    desc(mean_popularity)
+  )
+
+kable(
+  topic_audio_popularity,
+  digits = 3,
+  caption = "Popolarità e caratteristiche acustiche per topic dominante"
+)
+```
+
+```{r boxplot_topic_popolarita}
+ggplot(
+  song_topics %>%
+    filter(
+      !is.na(topic_label)
+    ),
+  aes(
+    x = reorder(
+      topic_label,
+      popularity,
+      FUN = median,
+      na.rm = TRUE
+    ),
+    y = popularity,
+    fill = topic_label
+  )
+) +
+  geom_boxplot(
+    show.legend = FALSE,
+    outlier.alpha = 0.30
+  ) +
+  coord_flip() +
+  theme_minimal() +
+  labs(
+    title = "Distribuzione della popolarità per topic dominante",
+    x = "Topic",
+    y = "Popolarità Spotify"
+  )
+```
+
+## 6.6 Modello statistico esplorativo
+
+Il modello mette in relazione la popolarità con il proxy testuale, le centralità medie degli artisti accreditati e le caratteristiche acustiche. Le centralità vengono trasformate con `log1p()` per ridurne l'asimmetria.
+
+La `core_betweenness` è disponibile soltanto per il nucleo di 2.500 artisti. Di conseguenza, `drop_na()` limita la regressione ai brani con informazioni complete e il campione finale non rappresenta tutti i testi abbinati.
+
+```{r preparazione_modello}
+model_df <- integrated_df %>%
+  group_by(doc_id) %>%
+  summarise(
+    popularity = first(popularity),
+    technology_proxy_gamma = first(technology_proxy_gamma),
+    log_strength = log1p(mean(weighted_degree, na.rm = TRUE)),
+    log_core_betweenness = log1p(mean(core_betweenness, na.rm = TRUE)),
+    log_pagerank = log1p(mean(pagerank, na.rm = TRUE)),
+    danceability = first(danceability),
+    energy = first(energy),
+    acousticness = first(acousticness),
+    valence = first(valence),
+    .groups = "drop"
+  ) %>%
+  drop_na()
+
+number_of_complete_observations <- nrow(model_df)
+
+kable(
+  tibble(
+    indicatore = "Osservazioni complete",
+    valore = number_of_complete_observations
+  ),
+  caption = "Numerosità del dataset usato nella regressione"
+)
+```
+
+```{r modello_popolarita}
+model_can_be_estimated <-
+  technology_words_available && number_of_complete_observations >= 60
+
+if (model_can_be_estimated) {
+  popularity_model <- lm(
+    popularity ~ technology_proxy_gamma + log_strength +
+      log_core_betweenness + log_pagerank + danceability +
+      energy + acousticness + valence,
+    data = model_df
+  )
+
+  # print() evita che l'output scompaia quando il modello è dentro if
+  print(summary(popularity_model))
+
+  model_r_squared <- summary(popularity_model)$r.squared
+  model_adjusted_r_squared <- summary(popularity_model)$adj.r.squared
+} else {
+  popularity_model <- NULL
+  model_r_squared <- NA_real_
+  model_adjusted_r_squared <- NA_real_
+  cat("Il modello non viene stimato: dati completi insufficienti.\n")
+}
+```
+
+# 7. Discussione dei risultati
+
+## 7.1 Struttura della rete delle collaborazioni
+
+La rete comprende `r format(vcount(net_graph), big.mark = ".", scientific = FALSE)` artisti con almeno una co-occorrenza nei crediti e `r format(ecount(net_graph), big.mark = ".", scientific = FALSE)` relazioni. Non include quindi gli artisti osservati soltanto in brani solisti.
+
+La Strength più alta appartiene a Pritam (627), seguito da Wolfgang Amadeus Mozart (557) e Arijit Singh (441). Questo risultato mostra anche un limite importante: i crediti Spotify collegano non soltanto featuring contemporanei, ma anche compositori, interpreti, orchestre e altri soggetti accreditati.
+
+Le community principali mostrano profili coerenti con generi o mercati musicali. Per esempio, la community 15 comprende J Balvin, Bad Bunny e Daddy Yankee; la 28 comprende David Guetta, Tiësto e Martin Garrix; la 126 raccoglie soprattutto musica classica. Le community sono però gruppi strutturali prodotti da Louvain e non etichette di genere già validate.
+
+
+## 7.2 Interpretazione dei topic
+
+La DTM contiene `r format(nrow(dtm), big.mark = ".", scientific = FALSE)` documenti e `r format(ncol(dtm), big.mark = ".", scientific = FALSE)` termini. Tra i valori provati è stato selezionato (k = `r selected_k`), con perplexity pari a `r round(min(lda_comparison$perplexity), 2)`.
+
+La perplexity diminuisce per tutti i candidati e raggiunge il minimo al limite superiore del confronto. Il risultato sostiene l'uso di 10 topic per questa analisi, ma non dimostra che 10 sia il numero ottimale in assoluto.
+
+Le parole principali permettono una lettura indicativa: il Topic 1 richiama spiritualità, conflitto e morte; il Topic 3 perdita e dolore; il Topic 8 relazioni sentimentali; il Topic 9 lessico rap esplicito; il Topic 10 lessico dancehall/reggae. Le etichette basate sulle prime quattro parole restano descrittive e molti brani presentano una miscela di più topic.
+
+## 7.3 Presenza dei temi tecnologici
+
+Il Topic `r technology_proxy_topic` assegna al dizionario tecnologico la massa beta più alta, pari a `r round(maximum_digital_mass, 6)`. Il secondo valore è `r round(second_digital_mass, 6)` e il rapporto fra i due è soltanto `r round(digital_mass_ratio, 2)`.
+
+Le parole più probabili del Topic 2 sono `head`, `stop`, `break` e `hands`, quindi non descrivono un tema tecnologico autonomo. Il risultato corretto è che il Topic 2 è **relativamente più vicino** al dizionario rispetto agli altri topic. Nel corpus non emerge invece una categoria latente chiaramente e principalmente dedicata a tecnologia, digitale o automazione.
+
+```{r discussione_tecnologia, echo=FALSE, results='asis'}
+if (technology_words_available) {
+
+  cat(
+    paste0(
+      "Il confronto post hoc con il lessico digitale ha individuato il Topic ",
+      technology_proxy_topic,
+      " come quello maggiormente associato all'area tecnologica. ",
+      "La massa beta complessiva dei termini digitali è pari a ",
+      round(maximum_digital_mass, 6),
+      ". Il risultato deve essere interpretato come associazione esplorativa, ",
+      "non come prova che tutti i brani appartenenti al topic trattino ",
+      "necessariamente la tecnologia.\n"
+    )
+  )
+
+} else {
+
+  cat(
+    paste(
+      "Nessun topic tecnologico autonomo è emerso dal corpus.",
+      "Questo risultato non dimostra che i testi non contengano mai",
+      "riferimenti alla tecnologia, ma indica che tali riferimenti",
+      "non formano un tema latente sufficientemente distinto",
+      "nel corpus analizzato.\n"
+    )
+  )
+}
+```
+
+## 7.4 Relazione fra rete, testi e popolarità
+
+Le correlazioni di Spearman fra il proxy tecnologico e le altre variabili sono tutte molto vicine a zero: −0,0343 con la Strength, −0,0896 con la `core_betweenness`, 0,0267 con PageRank e 0,0567 con la popolarità media. Nel campione non emerge quindi una relazione monotona sostanziale tra centralità dell'artista e vicinanza al topic relativamente più digitale.
+
+La popolarità media varia fra i topic: il Topic 5 raggiunge 45,301, il Topic 8 45,074 e il Topic 1 34,825. Queste sono differenze descrittive; senza un confronto inferenziale non provano che il contenuto del topic determini la popolarità.
+
+La regressione utilizza `r format(number_of_complete_observations, big.mark = ".", scientific = FALSE)` osservazioni. Il modello originale produce (R^2 = 0,06237) e (R^2) corretto pari a 0,06045: spiega quindi soltanto circa il 6,24% della variabilità della popolarità. Anche se il test complessivo è significativo, la capacità esplicativa rimane debole e non permette interpretazioni causali.
+
+## 7.5 Limiti dell'analisi
+
+I principali limiti sono:
+
+1. Spotify e Genius non condividono un identificatore univoco; il matching finale copre il 22,98% delle chiavi Spotify de-duplicate.
+2. Il matching esatto sulle chiavi normalizzate può perdere varianti grafiche e può creare qualche falso abbinamento.
+3. Il campione manuale di 30 corrispondenze è un controllo qualitativo, non una stima formale dell'accuratezza.
+4. La rete contiene co-occorrenze nei crediti e non soltanto featuring; esclude inoltre gli artisti presenti esclusivamente in brani solisti.
+5. L'analisi testuale è limitata ai testi classificati come inglesi e disponibili su Genius.
+6. Il numero di topic è il migliore fra i candidati provati, ma la perplexity non presenta un minimo interno.
+7. LDA richiede interpretazione manuale e l'assegnazione dominante può semplificare eccessivamente brani composti da più topic.
+8. Il dizionario tecnologico è applicato post hoc e produce un proxy relativo, non una classe certa.
+9. La `core_betweenness` è calcolata soltanto su 2.500 artisti; la regressione usa quindi un sottoinsieme selezionato di 3.919 osservazioni complete.
+10. Correlazioni e regressione descrivono associazioni e non relazioni causali.
+
+
+# 8. Conclusioni
+
+Il progetto ha integrato Network Science e Text Mining su 89.738 brani Spotify puliti e 18.411 corrispondenze con Genius. Il matching rate del 22,98% rende possibile un'analisi testuale ampia, ma limita le conclusioni al sottoinsieme di brani effettivamente allineato.
+
+La prima domanda di ricerca riguardava il ruolo delle collaborazioni. La rete mostra una struttura fortemente eterogenea, con 19.655 artisti collegati da 38.670 relazioni. Strength, PageRank e `core_betweenness` descrivono aspetti diversi della posizione degli artisti. Le community individuano gruppi coerenti con mercati e generi, ma la presenza di compositori e orchestre dimostra che la rete rappresenta crediti condivisi e non esclusivamente featuring.
+
+La seconda domanda riguardava i temi latenti e la presenza della tecnologia. LDA ha prodotto dieci insiemi lessicali interpretabili, ma il Topic 2, pur avendo la massa beta digitale più alta, non presenta parole principali chiaramente tecnologiche. Non emerge quindi un tema autonomo dedicato a digitale e automazione; emerge soltanto un topic relativamente più vicino al dizionario usato.
+
+La terza domanda chiedeva se centralità e contenuti tecnologici fossero associati. Le correlazioni, comprese tra −0,0896 e 0,0567, sono sostanzialmente nulle. Anche la regressione ha una capacità esplicativa limitata, con (R^2 = 0,06237). Nel campione analizzato non si osserva dunque una relazione rilevante tra posizione nella rete e ricorso al proxy tecnologico, né una relazione forte con la popolarità.
+
+Il risultato principale non è quindi la scoperta di un settore musicale già organizzato attorno alla tecnologia, ma l'assenza di evidenza sufficiente per sostenerlo con questi dati e con questo metodo. Un'estensione futura potrebbe usare identificatori ISRC per migliorare il matching e un dizionario validato, oppure un modello supervisionato, per distinguere riferimenti tecnologici reali da semplici occorrenze lessicali.
+
+# 9. Dichiarazione sull'uso di strumenti di IA
+
+ChatGPT è stato utilizzato come strumento di supporto per la revisione linguistica e il debugging di specifici blocchi di codice R, risolvere problemi di esecuzione e proporre soluzioni circoscritte:in particolare per la pulizia tramite espressioni regolari, la costruzione della Document-Term Matrix.
+I suggerimenti ricevuti sono stati letti, semplificati, adattati al progetto ed eseguiti dall'autore. La scelta dei dataset, le domande di ricerca, le soglie operative e l'interpretazione finale dei risultati restano responsabilità dell'autore.
+
+# 10. Riproducibilità
+
+Il seed fissato nel chunk iniziale rende riproducibili il campionamento training/test e l'addestramento LDA, compatibilmente con le versioni dei pacchetti. Durante la revisione è consigliabile usare `cache = FALSE` nel chunk `setup`, così ogni modifica viene realmente ricalcolata.
+
+```{r informazioni_sessione}
+sessionInfo()
+```
