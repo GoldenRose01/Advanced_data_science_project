@@ -97,7 +97,7 @@ library(corrplot)     # Visualizzazione matrici di correlazione
 library(knitr)        # Generazione tabelle eleganti per HTML
 library(scales)       # Formattazione assi numerici e percentuali
 library(broom)        # Risultati dei modelli in formato tabellare
-library(tinytex)      #PEr generare latex e PDF
+library(tinytex)      # Per generare latex e PDF
 ```
 
 ## 3.2 Caricamento del dataset Spotify
@@ -576,7 +576,7 @@ L'applicazione delle metriche di Network Science ha lo scopo di tradurre la topo
 - **Weighted Degree (Strength)**: somma i pesi degli archi di un artista e misura il volume delle sue co-occorrenze.
 
 - **Betweenness Centrality**: identifica i nodi che si trovano spesso nei cammini minimi.
-  Per ridurre i tempi di calcolo viene stimata soltanto sul nucleo dei 1.500 artisti con Strength maggiore.
+  Per ridurre i tempi di calcolo viene stimata soltanto sul nucleo dei 2.500 artisti con Strength maggiore.
   Nel report è quindi chiamata `core_betweenness` e non rappresenta l'intera rete.
 
 - **PageRank**: assegna un valore più alto ai nodi collegati ad altri nodi importanti.
@@ -1493,8 +1493,7 @@ cat(
 
 ## 6.2 Distribuzione dei topic nelle comunità Louvain
 
-Per rendere il confronto più stabile e leggibile vengono considerate le 15 community con più testi tra quelle associate ad almeno 30 brani distinti.
-Un brano con artisti appartenenti a community diverse può contribuire a più gruppi.
+Per rendere il confronto più stabile vengono considerate esclusivamente le community associate ad almeno cinque brani distinti. Questa soglia riduce l’influenza delle community rappresentate da un numero troppo limitato di testi, pur mantenendo una copertura adeguata dei gruppi presenti nel campione. Un brano con artisti appartenenti a community diverse può contribuire a più gruppi.
 
 ```{r topic_community}
 community_document_counts <- integrated_df %>%

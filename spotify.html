@@ -11,7 +11,7 @@
 
 <meta name="author" content="Francesco La Rosa (178327)" />
 
-<meta name="date" content="2026-08-28" />
+<meta name="date" content="2026-08-29" />
 
 <title>L’impatto della tecnologia nel mondo della musica</title>
 
@@ -1671,7 +1671,7 @@ musica</h1>
 <h3 class="subtitle">Un analisi di Network Science and Text Mining sugli
 Spotify Artists &amp; Lyrics</h3>
 <h4 class="author">Francesco La Rosa (178327)</h4>
-<h4 class="date">2026-08-28</h4>
+<h4 class="date">2026-08-29</h4>
 
 </div>
 
@@ -1769,7 +1769,7 @@ tabelle riassuntive nel report HTML.</p></li>
 <span id="cb1-7"><a href="#cb1-7" tabindex="-1"></a><span class="fu">library</span>(knitr)        <span class="co"># Generazione tabelle eleganti per HTML</span></span>
 <span id="cb1-8"><a href="#cb1-8" tabindex="-1"></a><span class="fu">library</span>(scales)       <span class="co"># Formattazione assi numerici e percentuali</span></span>
 <span id="cb1-9"><a href="#cb1-9" tabindex="-1"></a><span class="fu">library</span>(broom)        <span class="co"># Risultati dei modelli in formato tabellare</span></span>
-<span id="cb1-10"><a href="#cb1-10" tabindex="-1"></a><span class="fu">library</span>(tinytex)      <span class="co">#PEr generare latex e PDF</span></span></code></pre></div>
+<span id="cb1-10"><a href="#cb1-10" tabindex="-1"></a><span class="fu">library</span>(tinytex)      <span class="co"># Per generare latex e PDF</span></span></code></pre></div>
 </div>
 <div id="caricamento-del-dataset-spotify" class="section level2">
 <h2>3.2 Caricamento del dataset Spotify</h2>
@@ -2573,7 +2573,7 @@ all’interno del settore musicale:</p>
 archi di un artista e misura il volume delle sue co-occorrenze.</p></li>
 <li><p><strong>Betweenness Centrality</strong>: identifica i nodi che si
 trovano spesso nei cammini minimi. Per ridurre i tempi di calcolo viene
-stimata soltanto sul nucleo dei 1.500 artisti con Strength maggiore. Nel
+stimata soltanto sul nucleo dei 2.500 artisti con Strength maggiore. Nel
 report è quindi chiamata <code>core_betweenness</code> e non rappresenta
 l’intera rete.</p></li>
 <li><p><strong>PageRank</strong>: assegna un valore più alto ai nodi
@@ -4097,10 +4097,12 @@ vengono esclusi da questa integrazione.</p>
 </div>
 <div id="distribuzione-dei-topic-nelle-comunità-louvain" class="section level2">
 <h2>6.2 Distribuzione dei topic nelle comunità Louvain</h2>
-<p>Per rendere il confronto più stabile e leggibile vengono considerate
-le 15 community con più testi tra quelle associate ad almeno 30 brani
-distinti. Un brano con artisti appartenenti a community diverse può
-contribuire a più gruppi.</p>
+<p>Per rendere il confronto più stabile vengono considerate
+esclusivamente le community associate ad almeno cinque brani distinti.
+Questa soglia riduce l’influenza delle community rappresentate da un
+numero troppo limitato di testi, pur mantenendo una copertura adeguata
+dei gruppi presenti nel campione. Un brano con artisti appartenenti a
+community diverse può contribuire a più gruppi.</p>
 <div class="sourceCode" id="cb49"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb49-1"><a href="#cb49-1" tabindex="-1"></a>community_document_counts <span class="ot">&lt;-</span> integrated_df <span class="sc">%&gt;%</span></span>
 <span id="cb49-2"><a href="#cb49-2" tabindex="-1"></a>  <span class="fu">group_by</span>(</span>
 <span id="cb49-3"><a href="#cb49-3" tabindex="-1"></a>    community</span>
