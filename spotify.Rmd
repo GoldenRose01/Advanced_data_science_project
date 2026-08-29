@@ -1875,35 +1875,31 @@ if (model_can_be_estimated) {
 
 ## 7.1 Struttura della rete delle collaborazioni
 
-La rete comprende `format(vcount(net_graph), big.mark = ".", scientific = FALSE)` artisti con almeno una co-occorrenza nei crediti e `format(ecount(net_graph), big.mark = ".", scientific = FALSE)` relazioni.
-Non include quindi gli artisti osservati soltanto in brani solisti.
+## 7.1 Struttura della rete delle collaborazioni
 
-La Strength più alta appartiene a Pritam (627), seguito da Wolfgang Amadeus Mozart (557) e Arijit Singh (441).
-Questo risultato mostra anche un limite importante: i crediti Spotify collegano non soltanto featuring contemporanei, ma anche compositori, interpreti, orchestre e altri soggetti accreditati.
+La rete comprende 19.655 artisti con almeno una co-occorrenza nei crediti e 38.670 relazioni. Non include quindi gli artisti osservati soltanto in brani solisti.
 
-Le community principali mostrano profili coerenti con generi o mercati musicali.
-Per esempio, la community 15 comprende J Balvin, Bad Bunny e Daddy Yankee; la 28 comprende David Guetta, Tiësto e Martin Garrix; la 126 raccoglie soprattutto musica classica.
-Le community sono però gruppi strutturali prodotti da Louvain e non etichette di genere già validate.
+La Strength più alta appartiene a Pritam (627), seguito da Wolfgang Amadeus Mozart (557) e Arijit Singh (441). Questo risultato mostra anche un limite importante: i crediti Spotify collegano non soltanto featuring contemporanei, ma anche compositori, interpreti, orchestre e altri soggetti accreditati.
+
+Le community principali mostrano profili coerenti con generi o mercati musicali. Per esempio, la community 15 comprende J Balvin, Bad Bunny e Daddy Yankee; la community 28 comprende David Guetta, Tiësto e Martin Garrix; la community 126 raccoglie soprattutto musica classica. Le community sono però gruppi strutturali prodotti da Louvain e non etichette di genere già validate.
 
 ## 7.2 Interpretazione dei topic
 
-La DTM contiene `format(nrow(dtm), big.mark = ".", scientific = FALSE)` documenti e `format(ncol(dtm), big.mark = ".", scientific = FALSE)` termini.
-Tra i valori provati è stato selezionato (k = `selected_k`), con perplexity pari a `round(min(lda_comparison$perplexity), 2)`.
+## 7.2 Interpretazione dei topic
 
-La perplexity diminuisce per tutti i candidati e raggiunge il minimo al limite superiore del confronto.
-Il risultato sostiene l'uso di 10 topic per questa analisi, ma non dimostra che 10 sia il numero ottimale in assoluto.
+La DTM contiene 18.181 documenti e 12.806 termini. Tra i valori provati è stato selezionato \(k = 10\), con perplexity pari a 1659,56.
 
-Le parole principali permettono una lettura indicativa: il Topic 1 richiama spiritualità, conflitto e morte; il Topic 3 perdita e dolore; il Topic 8 relazioni sentimentali; il Topic 9 lessico rap esplicito; il Topic 10 lessico dancehall/reggae.
-Le etichette basate sulle prime quattro parole restano descrittive e molti brani presentano una miscela di più topic.
+La perplexity diminuisce per tutti i candidati e raggiunge il minimo al limite superiore del confronto. Il risultato sostiene l’uso di 10 topic per questa analisi, ma non dimostra che 10 sia il numero ottimale in assoluto.
+
+Le parole principali permettono una lettura indicativa: il Topic 1 richiama spiritualità, conflitto e morte; il Topic 3 perdita e dolore; il Topic 8 relazioni sentimentali; il Topic 9 lessico rap esplicito; il Topic 10 lessico dancehall/reggae. Le etichette basate sulle prime quattro parole restano descrittive e molti brani presentano una miscela di più topic.
 
 ## 7.3 Presenza dei temi tecnologici
 
-Il Topic `technology_proxy_topic` assegna al dizionario tecnologico la massa beta più alta, pari a `round(maximum_digital_mass, 6)`.
-Il secondo valore è `round(second_digital_mass, 6)` e il rapporto fra i due è soltanto `round(digital_mass_ratio, 2)`.
+## 7.3 Presenza dei temi tecnologici
 
-Le parole più probabili del Topic 2 sono `head`, `stop`, `break` e `hands`, quindi non descrivono un tema tecnologico autonomo.
-Il risultato corretto è che il Topic 2 è **relativamente più vicino** al dizionario rispetto agli altri topic.
-Nel corpus non emerge invece una categoria latente chiaramente e principalmente dedicata a tecnologia, digitale o automazione.
+Il Topic 2 assegna al dizionario tecnologico la massa beta più alta, pari a 0,006548. Il secondo valore è 0,005213 e il rapporto fra i due è soltanto 1,26.
+
+Le parole più probabili del Topic 2 sono `head`, `stop`, `break` e `hands`, quindi non descrivono un tema tecnologico autonomo. Il risultato corretto è che il Topic 2 è relativamente più vicino al dizionario rispetto agli altri topic. Nel corpus non emerge invece una categoria latente chiaramente e principalmente dedicata a tecnologia, digitale o automazione.
 
 ```{r discussione_tecnologia, echo=FALSE, results='asis'}
 if (technology_words_available) {
@@ -1937,15 +1933,13 @@ if (technology_words_available) {
 
 ## 7.4 Relazione fra rete, testi e popolarità
 
-Le correlazioni di Spearman fra il proxy tecnologico e le altre variabili sono tutte molto vicine a zero: −0,0343 con la Strength, −0,0896 con la `core_betweenness`, 0,0267 con PageRank e 0,0567 con la popolarità media.
-Nel campione non emerge quindi una relazione monotona sostanziale tra centralità dell'artista e vicinanza al topic relativamente più digitale.
+## 7.4 Relazione fra rete, testi e popolarità
 
-La popolarità media varia fra i topic: il Topic 5 raggiunge 45,301, il Topic 8 45,074 e il Topic 1 34,825.
-Queste sono differenze descrittive; senza un confronto inferenziale non provano che il contenuto del topic determini la popolarità.
+Le correlazioni di Spearman fra il proxy tecnologico e le altre variabili sono tutte molto vicine a zero: −0,0343 con la Strength, −0,0896 con la `core_betweenness`, 0,0267 con PageRank e 0,0567 con la popolarità media. Nel campione non emerge quindi una relazione monotona sostanziale tra centralità dell’artista e vicinanza al topic relativamente più digitale.
 
-La regressione utilizza `format(number_of_complete_observations, big.mark = ".", scientific = FALSE)` osservazioni.
-Il modello originale produce (R\^2 = 0,06237) e (R\^2) corretto pari a 0,06045: spiega quindi soltanto circa il 6,24% della variabilità della popolarità.
-Anche se il test complessivo è significativo, la capacità esplicativa rimane debole e non permette interpretazioni causali.
+La popolarità media varia fra i topic: il Topic 5 raggiunge 45,301, il Topic 8 raggiunge 45,074 e il Topic 1 raggiunge 34,825. Queste sono differenze descrittive; senza un confronto inferenziale non provano che il contenuto del topic determini la popolarità.
+
+La regressione utilizza 3.919 osservazioni. Il modello produce un \(R^2\) pari a 0,06237 e un \(R^2\) corretto pari a 0,06045: spiega quindi soltanto circa il 6,24% della variabilità della popolarità. Anche se il test complessivo è statisticamente significativo, la capacità esplicativa rimane debole e non permette interpretazioni causali.
 
 ## 7.5 Limiti dell'analisi
 
