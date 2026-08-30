@@ -1568,6 +1568,113 @@ if (nrow(community_topic_summary) > 0) {
   )
 }
 ```
+### 6.2.1 Visualizzazione delle principali comunità
+
+Il grafico precedente comprende tutte le community associate ad almeno cinque documenti distinti. Sebbene ciò permetta di mantenere un’elevata copertura dei dati, il numero di comunità rende difficile leggere le etichette sull’asse delle ascisse e confrontare visivamente le rispettive distribuzioni.
+
+Come approfondimento vengono quindi rappresentate separatamente le 20 community associate al maggior numero di documenti distinti. La selezione riguarda esclusivamente la visualizzazione e non modifica i dati utilizzati nelle analisi precedenti.
+
+```{r selezione_principali_community}
+# Seleziono le 20 community con il maggior numero di documenti distinti
+top_community_counts <- community_document_counts %>%
+  slice_max(
+    order_by = community_documents,
+    n = 20,
+    with_ties = FALSE
+  ) %>%
+  arrange(desc(community_documents))
+
+# Mantengo nel grafico soltanto le community selezionate
+community_topic_plot <- community_topic_summary %>%
+  inner_join(
+    top_community_counts,
+    by = "community"
+  )
+
+# Ordino numericamente i topic:
+# Topic 1, Topic 2, ..., Topic 10
+ordered_topic_labels <- community_topic_plot %>%
+  distinct(topic_label) %>%
+  mutate(
+    topic_number = parse_number(as.character(topic_label))
+  ) %>%
+  arrange(topic_number) %>%
+  pull(topic_label)
+
+# Creo etichette compatte e ordino le community
+# dalla più rappresentata alla meno rappresentata
+community_topic_plot <- community_topic_plot %>%
+  mutate(
+    topic_label = factor(
+      topic_label,
+      levels = ordered_topic_labels
+    ),
+    community_label = factor(
+      paste0("C", as.character(community)),
+      levels = paste0(
+        "C",
+        as.character(top_community_counts$community)
+      )
+    )
+  )
+```
+
+```{r grafico_principali_community, fig.width=12, fig.height=7}
+if (nrow(community_topic_plot) > 0) {
+
+  ggplot(
+    community_topic_plot,
+    aes(
+      x = community_label,
+      y = topic_share,
+      fill = topic_label
+    )
+  ) +
+    geom_col(
+      width = 0.8,
+      color = "white",
+      linewidth = 0.15
+    ) +
+    scale_y_continuous(
+      labels = percent_format(accuracy = 1),
+      breaks = seq(0, 1, by = 0.25),
+      expand = expansion(mult = c(0, 0.02))
+    ) +
+    labs(
+      title = "Distribuzione dei topic nelle principali comunità Louvain",
+      subtitle = paste(
+        "Le 20 comunità con il maggior numero",
+        "di documenti distinti"
+      ),
+      x = "Comunità Louvain",
+      y = "Quota di associazioni testuali",
+      fill = "Topic"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(
+        angle = 45,
+        hjust = 1,
+        vjust = 1,
+        size = 9
+      ),
+      panel.grid.major.x = element_blank(),
+      panel.grid.minor = element_blank(),
+      legend.position = "right",
+      plot.title = element_text(
+        face = "bold"
+      )
+    )
+
+} else {
+
+  cat(
+    "Non sono disponibili community sufficientemente rappresentate.\n"
+  )
+}
+```
+
+La visualizzazione ridotta consente di confrontare più chiaramente la composizione tematica dei gruppi maggiormente rappresentati. Le barre mantengono la normalizzazione al 100%: l’altezza di ogni segmento indica quindi la quota di documenti della community associata al rispettivo topic.
 
 ## 6.3 Aggregazione per artista
 
